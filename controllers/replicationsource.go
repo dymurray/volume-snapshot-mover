@@ -75,6 +75,10 @@ func (r *VolumeSnapshotBackupReconciler) buildReplicationSource(replicationSourc
 		return err
 	}
 
+	scName := "ocs-storagecluster-cephfs-shallow"
+	fsGroup := int64(1000720000)
+	//user := int64(0)
+
 	// build ReplicationSource
 	replicationSourceSpec := volsyncv1alpha1.ReplicationSourceSpec{
 		SourcePVC: pvc.Name,
@@ -85,8 +89,21 @@ func (r *VolumeSnapshotBackupReconciler) buildReplicationSource(replicationSourc
 			Repository: resticSecret.Name,
 			ReplicationSourceVolumeOptions: volsyncv1alpha1.ReplicationSourceVolumeOptions{
 				CopyMethod:              volsyncv1alpha1.CopyMethodDirect,
-				StorageClassName:        &vsb.Status.SourcePVCData.StorageClassName,
+				StorageClassName:        &scName,
 				VolumeSnapshotClassName: &vsb.Status.VolumeSnapshotClassName,
+				AccessModes:             []corev1.PersistentVolumeAccessMode{corev1.ReadOnlyMany},
+			},
+			CacheAccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+			CacheStorageClassName: &vsb.Status.SourcePVCData.StorageClassName,
+			MoverSecurityContext: &corev1.PodSecurityContext{
+				FSGroup: &fsGroup,
+				SELinuxOptions: &corev1.SELinuxOptions{
+					Level: "s0:c27,c9",
+				},
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+				//RunAsUser: &user,
 			},
 		},
 	}
@@ -149,7 +166,7 @@ func (r *VolumeSnapshotBackupReconciler) setStatusFromRepSource(vsb *volsnapmove
 		return false, nil
 
 		//if not in progress or completed, phase failed
-	} else if reconConditionProgress.Reason == volsyncv1alpha1.ReconciledReasonError {
+	} else if reconConditionProgress.Reason == volsyncv1alpha1.SynchronizingReasonError {
 		vsb.Status.Phase = volsnapmoverv1alpha1.SnapMoverBackupPhaseFailed
 
 		// Update VSB status

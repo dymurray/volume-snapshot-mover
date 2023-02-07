@@ -87,6 +87,7 @@ func (r *VolumeSnapshotBackupReconciler) buildPVCClone(pvcClone *corev1.Persiste
 		return err
 	}
 
+	scName := "ocs-storagecluster-cephfs-shallow"
 	if pvcClone.CreationTimestamp.IsZero() {
 		apiGroup := "snapshot.storage.k8s.io"
 		pvcClone.Spec.DataSource = &corev1.TypedLocalObjectReference{
@@ -95,11 +96,13 @@ func (r *VolumeSnapshotBackupReconciler) buildPVCClone(pvcClone *corev1.Persiste
 			APIGroup: &apiGroup,
 		}
 
-		pvcClone.Spec.AccessModes = sourcePVC.Spec.AccessModes
+		//pvcClone.Spec.AccessModes = sourcePVC.Spec.AccessModes
+		pvcClone.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadOnlyMany}
 
 		pvcClone.Spec.Resources = sourcePVC.Spec.Resources
 
-		pvcClone.Spec.StorageClassName = sourcePVC.Spec.StorageClassName
+		//pvcClone.Spec.StorageClassName = sourcePVC.Spec.StorageClassName
+		pvcClone.Spec.StorageClassName = &scName
 	}
 
 	return nil
@@ -125,6 +128,7 @@ func (r *VolumeSnapshotBackupReconciler) BindPVCToDummyPod(log logr.Logger) (boo
 		r.Log.Error(err, fmt.Sprintf("unable to fetch cloned PVC %s/%s", vsb.Spec.ProtectedNamespace, fmt.Sprintf("%s-pvc", vsb.Spec.VolumeSnapshotContent.Name)))
 		return false, err
 	}
+	fsGroup := int64(1000720000)
 
 	// Bind the above cloned PVC to a dummy pod
 	dp := &corev1.Pod{
@@ -148,6 +152,7 @@ func (r *VolumeSnapshotBackupReconciler) BindPVCToDummyPod(log logr.Logger) (boo
 						{
 							Name:      "vol1",
 							MountPath: "/mnt/volume1",
+							ReadOnly:  true,
 						},
 					},
 				},
@@ -158,11 +163,21 @@ func (r *VolumeSnapshotBackupReconciler) BindPVCToDummyPod(log logr.Logger) (boo
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: clonedPVC.Name,
+							ReadOnly:  true,
 						},
 					},
 				},
 			},
 			RestartPolicy: corev1.RestartPolicyNever,
+			SecurityContext: &corev1.PodSecurityContext{
+				FSGroup: &fsGroup,
+				SELinuxOptions: &corev1.SELinuxOptions{
+					Level: "s0:c27,c9",
+				},
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
 		},
 	}
 
